@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>安信可 UWB PDOA</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#080c14;--bg2:#0f1724;--bg3:#182234;--border:#1e3a5f;--border2:#253649;--text:#e8ecf4;--text2:#a0b4cc;--text3:#6b82a0;--blue:#60a5fa;--green:#34d399;--pink:#f472b6;--yellow:#fbbf24;--red:#ef4444}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden;font-size:14px}
+
+/* ─── Layout ─── */
+.app{display:grid;grid-template-rows:48px 1fr;grid-template-columns:1fr;height:100vh;position:relative}
+.app.sidebar-open{grid-template-columns:1fr 380px}
+
+/* ─── Header ─── */
+.header{grid-column:1/-1;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;z-index:10}
+.header h1{font-size:17px;font-weight:700;color:var(--blue);letter-spacing:1.5px;white-space:nowrap}
+.badges{display:flex;gap:10px;margin-left:16px}
+.badge{padding:3px 14px;border-radius:12px;font-size:12px;font-weight:600;letter-spacing:.3px}
+.badge.on{background:#064e3b;color:#6ee7b7}
+.badge.off{background:#451a03;color:var(--yellow)}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.toggle-sidebar-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500;transition:.2s}
+.toggle-sidebar-btn:hover{background:#243448;color:var(--text)}
+
+/* ─── Main ─── */
+.main{display:flex;flex-direction:column;overflow:hidden;position:relative}
+
+/* ─── Map ─── */
+.map-wrap{flex:1;position:relative;background:#090e18;overflow:hidden}
+#mapCanvas{display:block;width:100%;height:100%}
+
+/* ─── Floating Data Overlay ─── */
+.data-overlay{position:absolute;top:16px;left:16px;display:flex;gap:10px;z-index:5;pointer-events:none}
+.data-pill{background:rgba(15,23,36,.92);backdrop-filter:blur(12px);border:1px solid rgba(96,165,250,.25);border-radius:12px;padding:10px 18px;text-align:center;pointer-events:auto;min-width:90px}
+.data-pill .val{font-size:28px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums}
+.data-pill .lbl{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-top:2px;font-weight:600}
+
+/* ─── Tag Table ─── */
+.tag-table-wrap{height:120px;min-height:60px;border-top:1px solid var(--border);overflow:auto;background:var(--bg2)}
+.tag-table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
+.tag-table th{position:sticky;top:0;background:var(--bg3);color:var(--text3);font-weight:600;padding:6px 12px;text-align:center;border-bottom:1px solid var(--border2);font-size:12px}
+.tag-table td{padding:6px 12px;text-align:center;border-bottom:1px solid #151d2e;font-size:13px}
+.tag-table tr:hover td{background:rgba(96,165,250,.06)}
+.tag-table .addr{color:var(--blue);font-family:'Cascadia Code','Fira Code',monospace;font-weight:600}
+.tag-table .dist{color:var(--green);font-weight:700;font-size:14px}
+.tag-table .ang{color:var(--pink);font-weight:700;font-size:14px}
+.resize-handle{height:5px;background:var(--border);cursor:ns-resize;transition:.2s}
+.resize-handle:hover{background:var(--blue)}
+
+/* ─── Sidebar ─── */
+.sidebar{background:var(--bg2);border-left:1px solid var(--border);display:none;flex-direction:column;overflow:hidden}
+.app.sidebar-open .sidebar{display:flex}
+
+/* ─── Tabs ─── */
+.tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg3)}
+.tab{flex:1;padding:10px 6px;text-align:center;font-size:13px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:.2s}
+.tab:hover{color:var(--text2)}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.tab-panels{flex:1;overflow-y:auto;padding:16px}
+.panel{display:none}
+.panel.active{display:block}
+
+/* ─── Groups ─── */
+.group{margin-bottom:18px}
+.group-title{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--text3);margin-bottom:10px;font-weight:700}
+.row{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+.row label{min-width:64px;color:var(--text2);font-size:13px;font-weight:500}
+
+/* ─── Form ─── */
+select,input[type=text],input[type=number]{width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border2);border-radius:8px;color:var(--text);font-size:13px}
+select{cursor:pointer}
+.btn{padding:8px 16px;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:.15s;text-align:center}
+.btn-sm{padding:6px 12px;font-size:12px}
+.btn-primary{background:#2563eb;color:#fff}
+.btn-primary:hover{background:#3b82f6}
+.btn-danger{background:#dc2626;color:#fff}
+.btn-danger:hover{background:var(--red)}
+.btn-success{background:#059669;color:#fff}
+.btn-success:hover{background:#10b981}
+.btn-secondary{background:#374151;color:var(--text)}
+.btn-secondary:hover{background:#4b5563}
+.btn-block{width:100%}
+
+/* ─── Live cards in sidebar ─── */
+.live-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.live-card{background:var(--bg);border-radius:10px;padding:12px 8px;text-align:center;border:1px solid var(--border2)}
+.live-val{font-size:24px;font-weight:800;line-height:1.2;font-variant-numeric:tabular-nums}
+.live-lbl{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+
+/* ─── AT Terminal ─── */
+.at-terminal{background:var(--bg);border-radius:8px;font-family:'Cascadia Code','Fira Code',monospace;font-size:12px;height:220px;overflow-y:auto;padding:10px;color:var(--text2);margin-bottom:10px;line-height:1.6;border:1px solid var(--border2)}
+.at-terminal .tx{color:var(--green)}
+.at-terminal .rx{color:var(--yellow)}
+.at-input-row{display:flex;gap:6px}
+.at-input-row input{flex:1}
+
+/* ─── Log ─── */
+.log-box{background:var(--bg);border-radius:8px;font-family:'Cascadia Code','Fira Code',monospace;font-size:11px;height:140px;overflow-y:auto;padding:10px;color:var(--text3);line-height:1.6;border:1px solid var(--border2)}
+
+/* ─── Checkbox ─── */
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer;margin-bottom:6px;font-weight:500}
+.chk input{accent-color:var(--blue);width:16px;height:16px}
+
+#floorplanInput{display:none}
+</style>
+</head>
+<body>
+<div class="app sidebar-open">
+  <div class="header">
+    <h1>◎ 安信可 UWB PDOA</h1>
+    <div class="badges">
+      <span id="usbBadge" class="badge off">USB 未连接</span>
+      <span id="atBadge" class="badge off">AT 未连接</span>
+      <span id="logBadge" class="badge off" style="display:none">记录中</span>
+    </div>
+    <div class="header-right">
+      <button class="toggle-sidebar-btn" id="toggleSidebarBtn" onclick="toggleSidebar()">收起面板 ▶</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="map-wrap">
+      <canvas id="mapCanvas"></canvas>
+      <!-- Floating live data on map -->
+      <div class="data-overlay">
+        <div class="data-pill"><div class="val" style="color:var(--green)" id="liveD">--</div><div class="lbl">距离 cm</div></div>
+        <div class="data-pill"><div class="val" style="color:var(--pink)" id="liveA">--</div><div class="lbl">角度 °</div></div>
+        <div class="data-pill"><div class="val" style="color:var(--blue)" id="liveX">--</div><div class="lbl">X cm</div></div>
+        <div class="data-pill"><div class="val" style="color:var(--yellow)" id="liveY">--</div><div class="lbl">Y cm</div></div>
+      </div>
+    </div>
+    <div class="resize-handle" id="resizeHandle"></div>
+    <div class="tag-table-wrap" id="tableWrap">
+      <table class="tag-table">
+        <thead><tr>
+          <th>标签ID</th><th>X(m)</th><th>Y(m)</th><th>距离(cm)</th><th>角度(°)</th>
+          <th>PDOA</th><th>电量</th><th>AccX</th><th>AccY</th><th>AccZ</th>
+        </tr></thead>
+        <tbody id="tagTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="tabs">
+      <div class="tab active" data-tab="serial">串口</div>
+      <div class="tab" data-tab="display">显示</div>
+      <div class="tab" data-tab="calib">校正</div>
+      <div class="tab" data-tab="at">AT指令</div>
+      <div class="tab" data-tab="log">日志</div>
+    </div>
+    <div class="tab-panels">
+      <!-- Serial Tab -->
+      <div class="panel active" id="panel-serial">
+        <div class="group">
+          <div class="group-title">USB 数据口 (BU04)</div>
+          <select id="usbPortSel"><option value="">选择端口...</option></select>
+          <div class="row" style="margin-top:8px">
+            <button class="btn btn-secondary btn-sm" onclick="refreshPorts()">刷新</button>
+            <button class="btn btn-primary btn-sm" id="usbConnBtn" onclick="toggleUsb()" style="flex:1">连接</button>
+          </div>
+        </div>
+        <div class="group">
+          <div class="group-title">TTL AT指令口</div>
+          <select id="atPortSel"><option value="">选择端口...</option></select>
+          <div class="row" style="margin-top:8px">
+            <button class="btn btn-secondary btn-sm" onclick="refreshPorts()">刷新</button>
+            <button class="btn btn-primary btn-sm" id="atConnBtn" onclick="toggleAt()" style="flex:1">连接</button>
+          </div>
+        </div>
+        <div class="group">
+          <div class="group-title">实时数据</div>
+          <div class="live-grid">
+            <div class="live-card"><div class="live-val" style="color:var(--green)" id="liveD2">--</div><div class="live-lbl">距离 cm</div></div>
+            <div class="live-card"><div class="live-val" style="color:var(--pink)" id="liveA2">--</div><div class="live-lbl">角度 °</div></div>
+            <div class="live-card"><div class="live-val" style="color:var(--blue)" id="liveX2">--</div><div class="live-lbl">X cm</div></div>
+            <div class="live-card"><div class="live-val" style="color:var(--yellow)" id="liveY2">--</div><div class="live-lbl">Y cm</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Display Tab -->
+      <div class="panel" id="panel-display">
+        <div class="group">
+          <div class="group-title">显示选项</div>
+          <label class="chk"><input type="checkbox" id="chkGrid" checked onchange="draw()"> 显示网格</label>
+          <label class="chk"><input type="checkbox" id="chkTrail" checked onchange="draw()"> 显示轨迹</label>
+          <label class="chk"><input type="checkbox" id="chkFov" checked onchange="draw()"> 显示FOV</label>
+          <label class="chk"><input type="checkbox" id="chkLabels" checked onchange="draw()"> 显示标注</label>
+        </div>
+        <div class="group">
+          <div class="group-title">网格设置</div>
+          <div class="row"><label>范围(m)</label><input type="number" id="gridRange" value="5" min="1" max="50" step="1" onchange="draw()"></div>
+          <div class="row"><label>网格(m)</label><input type="number" id="gridStep" value="0.5" min="0.1" max="5" step="0.1" onchange="draw()"></div>
+        </div>
+        <div class="group">
+          <div class="group-title">背景平面图</div>
+          <input type="file" id="floorplanInput" accept="image/*" onchange="loadFloorplan(event)">
+          <button class="btn btn-secondary btn-sm btn-block" onclick="document.getElementById('floorplanInput').click()">加载平面图</button>
+          <button class="btn btn-secondary btn-sm btn-block" style="margin-top:6px" onclick="clearFloorplan()">清除平面图</button>
+        </div>
+        <div class="group">
+          <div class="group-title">操作</div>
+          <button class="btn btn-secondary btn-sm btn-block" onclick="centerView()">回到原点</button>
+          <button class="btn btn-danger btn-sm btn-block" style="margin-top:6px" onclick="clearTrails()">清除轨迹</button>
+          <button class="btn btn-danger btn-sm btn-block" style="margin-top:6px" onclick="clearTags()">清除标签</button>
+        </div>
+      </div>
+
+      <!-- Calibration Tab -->
+      <div class="panel" id="panel-calib">
+        <div class="group">
+          <div class="group-title">角度校正</div>
+          <div class="row"><label>偏移(°)</label><input type="number" id="angleOffset" value="0" step="0.1"></div>
+          <p style="font-size:12px;color:var(--text3);margin:6px 0">校正时BU04正面朝向标签，标签在中轴线上，距离>1m</p>
+          <button class="btn btn-primary btn-sm btn-block" onclick="applyCalib()">应用校正</button>
+        </div>
+        <div class="group">
+          <div class="group-title">距离校正 y = a × x + b</div>
+          <div class="row"><label>系数 a</label><input type="number" id="distA" value="1.0" step="0.001"></div>
+          <div class="row"><label>系数 b</label><input type="number" id="distB" value="0" step="0.1"></div>
+          <button class="btn btn-primary btn-sm btn-block" onclick="applyCalib()">应用校正</button>
+        </div>
+        <div class="group">
+          <div class="group-title">快捷AT配置</div>
+          <div class="row">
+            <button class="btn btn-success btn-sm" style="flex:1" onclick="quickAT('AT+SETCFG=0,1,1,1')">设为基站</button>
+            <button class="btn btn-success btn-sm" style="flex:1" onclick="quickAT('AT+SETCFG=0,0,1,1')">设为标签</button>
+          </div>
+          <div class="row">
+            <button class="btn btn-success btn-sm" style="flex:1" onclick="quickAT('AT+SETUWBMODE=1')">PDOA模式</button>
+            <button class="btn btn-success btn-sm" style="flex:1" onclick="quickAT('AT+SETUWBMODE=0')">TWR模式</button>
+          </div>
+          <div class="row">
+            <button class="btn btn-success btn-sm" style="flex:1" onclick="quickAT('AT+SAVE')">保存</button>
+            <button class="btn btn-danger btn-sm" style="flex:1" onclick="quickAT('AT+RESTORE')">恢复出厂</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AT Terminal Tab -->
+      <div class="panel" id="panel-at">
+        <div class="group">
+          <div class="group-title">AT 终端</div>
+          <div class="at-terminal" id="atTerminal"></div>
+          <div class="at-input-row">
+            <input type="text" id="atInput" placeholder="输入AT指令..." onkeydown="if(event.key==='Enter')sendAT()">
+            <button class="btn btn-primary btn-sm" onclick="sendAT()">发送</button>
+          </div>
+        </div>
+        <div class="group">
+          <div class="group-title">常用指令</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <button class="btn btn-secondary btn-sm" onclick="quickAT('AT+SETCFG=0,1,1,1')">基站配置</button>
+            <button class="btn btn-secondary btn-sm" onclick="quickAT('AT+SETCFG=0,0,1,1')">标签配置</button>
+            <button class="btn btn-secondary btn-sm" onclick="quickAT('AT+SETUWBMODE=1')">PDOA</button>
+            <button class="btn btn-secondary btn-sm" onclick="quickAT('AT+SAVE')">SAVE</button>
+            <button class="btn btn-secondary btn-sm" onclick="quickAT('AT+RESTORE')">RESTORE</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log Tab -->
+      <div class="panel" id="panel-log">
+        <div class="group">
+          <div class="group-title">数据记录</div>
+          <div class="row">
+            <button class="btn btn-success btn-sm" id="logStartBtn" style="flex:1" onclick="toggleLog()">开始记录</button>
+          </div>
+          <p style="font-size:12px;color:var(--text3);margin-top:6px" id="logStatus">未在记录</p>
+        </div>
+        <div class="group">
+          <div class="group-title">系统日志</div>
+          <div class="log-box" id="sysLog"></div>
+        </div>
+        <div class="group">
+          <div class="group-title">原始数据</div>
+          <div class="log-box" id="rawLog" style="height:180px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────
+let ws = null;
+let usbConnected = false, atConnected = false, isLogging = false;
+let canvas, ctx;
+let dpr = 1;
+const tagColors = ['#60a5fa','#f472b6','#34d399','#fbbf24','#a78bfa','#fb923c','#38bdf8','#e879f9'];
+let tags = {};
+let colorIdx = 0;
+let floorplanImg = null;
+let sidebarOpen = true;
+
+let viewCenterX = 0, viewCenterY = 0;
+let isDragging = false, dragStartX = 0, dragStartY = 0, dragViewX = 0, dragViewY = 0;
+
+// ─── Init ────────────────────────────────────────────
+window.addEventListener('load', () => {
+    canvas = document.getElementById('mapCanvas');
+    ctx = canvas.getContext('2d');
+    dpr = window.devicePixelRatio || 1;
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    initTabs();
+    initResize();
+    initMapInteraction();
+    connectWS();
+    requestAnimationFrame(animLoop);
+});
+
+function resizeCanvas() {
+    dpr = window.devicePixelRatio || 1;
+    const r = canvas.parentElement.getBoundingClientRect();
+    canvas.width = r.width * dpr;
+    canvas.height = r.height * dpr;
+    canvas.style.width = r.width + 'px';
+    canvas.style.height = r.height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+}
+
+// ─── Sidebar Toggle ──────────────────────────────────
+function toggleSidebar() {
+    sidebarOpen = !sidebarOpen;
+    document.querySelector('.app').classList.toggle('sidebar-open', sidebarOpen);
+    document.getElementById('toggleSidebarBtn').textContent = sidebarOpen ? '收起面板 ▶' : '◀ 展开面板';
+    setTimeout(() => { resizeCanvas(); draw(); }, 50);
+}
+
+// ─── WebSocket ───────────────────────────────────────
+function connectWS() {
+    ws = new WebSocket('ws://localhost:8765');
+    ws.onopen = () => { sysLog('WebSocket 已连接'); refreshPorts(); };
+    ws.onmessage = e => handleMsg(JSON.parse(e.data));
+    ws.onclose = () => { sysLog('WebSocket 断开，重连中...'); setTimeout(connectWS, 2000); };
+    ws.onerror = () => {};
+}
+function wsSend(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+
+function handleMsg(d) {
+    switch(d.type) {
+        case 'ports': fillPorts(d.data); break;
+        case 'usb_status':
+            usbConnected = d.connected;
+            updateBadge('usbBadge', d.connected, 'USB');
+            document.getElementById('usbConnBtn').textContent = d.connected ? '断开' : '连接';
+            document.getElementById('usbConnBtn').className = 'btn btn-sm ' + (d.connected ? 'btn-danger' : 'btn-primary');
+            sysLog(d.connected ? `USB 已连接 ${d.port}` : 'USB 已断开');
+            break;
+        case 'at_status':
+            atConnected = d.connected;
+            updateBadge('atBadge', d.connected, 'AT');
+            document.getElementById('atConnBtn').textContent = d.connected ? '断开' : '连接';
+            document.getElementById('atConnBtn').className = 'btn btn-sm ' + (d.connected ? 'btn-danger' : 'btn-primary');
+            sysLog(d.connected ? `AT 已连接 ${d.port}` : 'AT 已断开');
+            break;
+        case 'position': updateTag(d); break;
+        case 'new_tag':
+            sysLog(`新标签: ${d.id}`);
+            atLog(`<span class="rx">&lt; NewTag: ${d.id}</span>`);
+            break;
+        case 'at_response': atLog(`<span class="rx">&lt; ${esc(d.text)}</span>`); break;
+        case 'at_sent': atLog(`<span class="tx">&gt; ${esc(d.text)}</span>`); break;
+        case 'raw': rawLog(d.text); break;
+        case 'error': sysLog(`错误: ${d.msg}`); break;
+        case 'calibration_updated':
+            sysLog(`校正: 偏移=${d.angle_offset}° a=${d.dist_a} b=${d.dist_b}`);
+            break;
+        case 'logging':
+            isLogging = d.enabled;
+            document.getElementById('logStartBtn').textContent = d.enabled ? '停止记录' : '开始记录';
+            document.getElementById('logStartBtn').className = 'btn btn-sm ' + (d.enabled ? 'btn-danger' : 'btn-success');
+            document.getElementById('logStatus').textContent = d.enabled ? `记录中: ${d.file}` : '未在记录';
+            document.getElementById('logBadge').style.display = d.enabled ? '' : 'none';
+            break;
+        case 'tags_cleared': tags = {}; updateTable(); sysLog('标签已清除'); break;
+    }
+}
+
+// ─── Tag Management ──────────────────────────────────
+function updateTag(d) {
+    const addr = d.addr || 'unknown';
+    if (!tags[addr]) tags[addr] = { data: d, trail: [], ci: colorIdx++ % tagColors.length };
+    tags[addr].data = d;
+    tags[addr].trail.push({ x: d.xm, y: d.ym, t: Date.now() });
+    if (tags[addr].trail.length > 200) tags[addr].trail.shift();
+
+    // Floating overlay
+    document.getElementById('liveD').textContent = d.distance;
+    document.getElementById('liveA').textContent = d.angle;
+    document.getElementById('liveX').textContent = d.xcm;
+    document.getElementById('liveY').textContent = d.ycm;
+    // Sidebar cards
+    document.getElementById('liveD2').textContent = d.distance;
+    document.getElementById('liveA2').textContent = d.angle;
+    document.getElementById('liveX2').textContent = d.xcm;
+    document.getElementById('liveY2').textContent = d.ycm;
+
+    updateTable();
+    draw();
+}
+
+function updateTable() {
+    const tbody = document.getElementById('tagTableBody');
+    let html = '';
+    for (const [addr, t] of Object.entries(tags)) {
+        const d = t.data, c = tagColors[t.ci];
+        html += `<tr>
+            <td class="addr" style="color:${c}">${addr}</td>
+            <td>${d.xm}</td><td>${d.ym}</td>
+            <td class="dist">${d.distance}</td><td class="ang">${d.angle}</td>
+            <td>${d.pdoa}</td><td>${d.battery}</td>
+            <td>${d.acc_x}</td><td>${d.acc_y}</td><td>${d.acc_z}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
+// ─── Map Drawing ─────────────────────────────────────
+let needDraw = true;
+function draw() { needDraw = true; }
+function animLoop() {
+    if (needDraw) { drawMap(); needDraw = false; }
+    requestAnimationFrame(animLoop);
+}
+
+function drawMap() {
+    if (!ctx) return;
+    const W = canvas.width / dpr, H = canvas.height / dpr;
+    const range = parseFloat(document.getElementById('gridRange').value) || 5;
+    const step = parseFloat(document.getElementById('gridStep').value) || 0.5;
+    const showGrid = document.getElementById('chkGrid').checked;
+    const showTrail = document.getElementById('chkTrail').checked;
+    const showFov = document.getElementById('chkFov').checked;
+    const showLabels = document.getElementById('chkLabels').checked;
+
+    const ppm = Math.min(W, H) / (range * 2);
+    const cx = W / 2 - viewCenterX * ppm;
+    const cy = H - 50 - viewCenterY * ppm;
+
+    // Clear
+    ctx.fillStyle = '#090e18';
+    ctx.fillRect(0, 0, W, H);
+
+    // Floorplan
+    if (floorplanImg) {
+        ctx.globalAlpha = 0.3;
+        ctx.drawImage(floorplanImg, 0, 0, W, H);
+        ctx.globalAlpha = 1;
+    }
+
+    // Grid
+    if (showGrid) {
+        ctx.strokeStyle = '#1a2844';
+        ctx.lineWidth = 1;
+        for (let x = -range * 2; x <= range * 2; x += step) {
+            const px = cx + x * ppm;
+            if (px < 0 || px > W) continue;
+            ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+        }
+        for (let y = -range * 2; y <= range * 2; y += step) {
+            const py = cy - y * ppm;
+            if (py < 0 || py > H) continue;
+            ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke();
+        }
+        if (showLabels) {
+            ctx.font = '12px "Segoe UI", sans-serif';
+            ctx.fillStyle = '#3a506e';
+            ctx.textAlign = 'center';
+            for (let x = -range * 2; x <= range * 2; x += step * 2) {
+                const px = cx + x * ppm;
+                if (px > 20 && px < W - 20) ctx.fillText(`${x.toFixed(1)}`, px, cy + 18);
+            }
+            ctx.textAlign = 'right';
+            for (let y = 0; y <= range * 2; y += step * 2) {
+                const py = cy - y * ppm;
+                if (py > 20 && py < H - 10) ctx.fillText(`${y.toFixed(1)}m`, cx - 8, py + 5);
+            }
+        }
+    }
+
+    // Axes
+    ctx.strokeStyle = '#2563eb55';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+
+    // FOV
+    if (showFov) {
+        ctx.save();
+        ctx.strokeStyle = '#f59e0b44';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 5]);
+        const fovR = range * ppm;
+        [-60, 60].forEach(a => {
+            const rad = (a - 90) * Math.PI / 180;
+            ctx.beginPath(); ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + Math.cos(rad) * fovR, cy + Math.sin(rad) * fovR);
+            ctx.stroke();
+        });
+        ctx.beginPath();
+        ctx.arc(cx, cy, fovR * 0.96, (-60 - 90) * Math.PI / 180, (60 - 90) * Math.PI / 180);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (showLabels) {
+            ctx.fillStyle = '#f59e0b66';
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('120° FOV', cx, cy - fovR * 0.96 - 10);
+        }
+        ctx.restore();
+    }
+
+    // Range rings
+    ctx.strokeStyle = '#1e3a5f88';
+    ctx.lineWidth = 1;
+    for (let r = 1; r <= range * 2; r++) {
+        const rr = r * ppm;
+        if (rr > Math.max(W, H)) break;
+        ctx.beginPath(); ctx.arc(cx, cy, rr, Math.PI, 2 * Math.PI); ctx.stroke();
+        if (showLabels) {
+            ctx.fillStyle = '#3a506e';
+            ctx.font = 'bold 12px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${r}m`, cx + 6, cy - rr - 5);
+        }
+    }
+
+    // Angle guide lines (-60 -30 0 30 60)
+    if (showLabels) {
+        const guideR = range * ppm * 0.9;
+        [-60, -30, 0, 30, 60].forEach(a => {
+            const rad = (a - 90) * Math.PI / 180;
+            const ex = cx + Math.cos(rad) * guideR;
+            const ey = cy + Math.sin(rad) * guideR;
+            ctx.beginPath();
+            ctx.strokeStyle = a === 0 ? '#2563eb33' : '#1e3a5f33';
+            ctx.lineWidth = a === 0 ? 2 : 1;
+            ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+            ctx.fillStyle = '#4b6584';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${a}°`, ex + (a < 0 ? -14 : a > 0 ? 14 : 0), ey - 10);
+        });
+    }
+
+    // ─── Tags ────────────────────────────────────────
+    for (const [addr, t] of Object.entries(tags)) {
+        const c = tagColors[t.ci], d = t.data;
+
+        // Trail
+        if (showTrail && t.trail.length > 1) {
+            ctx.beginPath();
+            ctx.strokeStyle = c + '55';
+            ctx.lineWidth = 2;
+            t.trail.forEach((p, i) => {
+                const px = cx + p.x * ppm, py = cy - p.y * ppm;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            });
+            ctx.stroke();
+            t.trail.forEach((p, i) => {
+                const a = 0.1 + (i / t.trail.length) * 0.5;
+                ctx.beginPath();
+                ctx.fillStyle = c + Math.round(a * 255).toString(16).padStart(2, '0');
+                ctx.arc(cx + p.x * ppm, cy - p.y * ppm, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        const tx = cx + d.xm * ppm, ty = cy - d.ym * ppm;
+
+        // Glow
+        const g = ctx.createRadialGradient(tx, ty, 0, tx, ty, 30);
+        g.addColorStop(0, c + 'aa');
+        g.addColorStop(1, c + '00');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(tx, ty, 30, 0, Math.PI * 2); ctx.fill();
+
+        // Dot
+        ctx.beginPath();
+        ctx.fillStyle = c;
+        ctx.arc(tx, ty, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+
+        // Label
+        if (showLabels) {
+            // Background for label
+            const labelText = `${d.distance}cm  ${d.angle}°`;
+            ctx.font = 'bold 14px "Segoe UI", monospace';
+            const tw = ctx.measureText(labelText).width;
+            ctx.fillStyle = 'rgba(9,14,24,.85)';
+            ctx.beginPath();
+            ctx.roundRect(tx - tw/2 - 8, ty - 32, tw + 16, 22, 6);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'center';
+            ctx.fillText(labelText, tx, ty - 16);
+
+            ctx.font = 'bold 12px monospace';
+            ctx.fillStyle = c;
+            ctx.fillText(`#${addr}`, tx, ty + 24);
+        }
+    }
+
+    // Base station
+    ctx.beginPath();
+    ctx.fillStyle = '#10b981';
+    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    if (showLabels) {
+        ctx.fillStyle = '#6ee7b7';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('基站 BU04', cx, cy + 28);
+    }
+
+    needDraw = false;
+}
+
+// ─── Map Interaction ─────────────────────────────────
+function initMapInteraction() {
+    canvas.addEventListener('mousedown', e => {
+        isDragging = true;
+        dragStartX = e.clientX; dragStartY = e.clientY;
+        dragViewX = viewCenterX; dragViewY = viewCenterY;
+        canvas.style.cursor = 'grabbing';
+    });
+    window.addEventListener('mousemove', e => {
+        if (!isDragging) return;
+        const range = parseFloat(document.getElementById('gridRange').value) || 5;
+        const W = canvas.width / dpr, H = canvas.height / dpr;
+        const ppm = Math.min(W, H) / (range * 2);
+        viewCenterX = dragViewX - (e.clientX - dragStartX) / ppm;
+        viewCenterY = dragViewY + (e.clientY - dragStartY) / ppm;
+        draw();
+    });
+    window.addEventListener('mouseup', () => { isDragging = false; canvas.style.cursor = ''; });
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const el = document.getElementById('gridRange');
+        let r = parseFloat(el.value);
+        r += e.deltaY > 0 ? 0.5 : -0.5;
+        r = Math.max(1, Math.min(50, r));
+        el.value = r;
+        draw();
+    });
+}
+function centerView() { viewCenterX = 0; viewCenterY = 0; draw(); }
+
+// ─── Resize Handle ───────────────────────────────────
+function initResize() {
+    const handle = document.getElementById('resizeHandle');
+    const wrap = document.getElementById('tableWrap');
+    let startY, startH;
+    handle.addEventListener('mousedown', e => {
+        startY = e.clientY; startH = wrap.offsetHeight;
+        const onMove = e2 => {
+            wrap.style.height = Math.max(60, startH - (e2.clientY - startY)) + 'px';
+            resizeCanvas(); draw();
+        };
+        const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+    });
+}
+
+// ─── Tabs ────────────────────────────────────────────
+function initTabs() {
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+        });
+    });
+}
+
+// ─── Serial Port Actions ─────────────────────────────
+function refreshPorts() { wsSend({ action: 'list_ports' }); }
+function fillPorts(ports) {
+    ['usbPortSel', 'atPortSel'].forEach(id => {
+        const sel = document.getElementById(id);
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">选择端口...</option>';
+        ports.forEach(p => { sel.innerHTML += `<option value="${p.port}">${p.port} - ${p.desc}</option>`; });
+        if (cur) sel.value = cur;
+    });
+}
+function toggleUsb() {
+    if (usbConnected) { wsSend({ action: 'disconnect_usb' }); }
+    else {
+        const p = document.getElementById('usbPortSel').value;
+        if (!p) { sysLog('请选择USB端口'); return; }
+        wsSend({ action: 'connect_usb', port: p });
+    }
+}
+function toggleAt() {
+    if (atConnected) { wsSend({ action: 'disconnect_at' }); }
+    else {
+        const p = document.getElementById('atPortSel').value;
+        if (!p) { sysLog('请选择AT端口'); return; }
+        wsSend({ action: 'connect_at', port: p });
+    }
+}
+
+// ─── AT Commands ─────────────────────────────────────
+function sendAT() {
+    const inp = document.getElementById('atInput');
+    const cmd = inp.value.trim();
+    if (!cmd) return;
+    wsSend({ action: 'send_at', text: cmd });
+    inp.value = '';
+}
+function quickAT(cmd) { wsSend({ action: 'send_at', text: cmd }); sysLog(`发送: ${cmd}`); }
+
+// ─── Calibration / Logging ───────────────────────────
+function applyCalib() {
+    wsSend({
+        action: 'set_calibration',
+        angle_offset: parseFloat(document.getElementById('angleOffset').value) || 0,
+        dist_a: parseFloat(document.getElementById('distA').value) || 1,
+        dist_b: parseFloat(document.getElementById('distB').value) || 0,
+    });
+}
+function toggleLog() { wsSend({ action: isLogging ? 'stop_logging' : 'start_logging' }); }
+
+// ─── Floorplan ───────────────────────────────────────
+function loadFloorplan(e) {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+        floorplanImg = new Image();
+        floorplanImg.onload = () => draw();
+        floorplanImg.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+function clearFloorplan() { floorplanImg = null; draw(); }
+
+// ─── Utils ───────────────────────────────────────────
+function clearTrails() { for (const t of Object.values(tags)) t.trail = []; draw(); }
+function clearTags() { wsSend({ action: 'clear_tags' }); tags = {}; updateTable(); draw(); }
+
+function updateBadge(id, on, label) {
+    const el = document.getElementById(id);
+    el.className = 'badge ' + (on ? 'on' : 'off');
+    el.textContent = label + (on ? ' 已连接' : ' 未连接');
+}
+function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function sysLog(msg) {
+    const el = document.getElementById('sysLog');
+    const t = new Date().toLocaleTimeString();
+    el.innerHTML += `<div>[${t}] ${esc(msg)}</div>`;
+    el.scrollTop = el.scrollHeight;
+    if (el.children.length > 200) el.removeChild(el.firstChild);
+}
+function atLog(html) {
+    const el = document.getElementById('atTerminal');
+    el.innerHTML += `<div>${html}</div>`;
+    el.scrollTop = el.scrollHeight;
+    if (el.children.length > 300) el.removeChild(el.firstChild);
+}
+function rawLog(text) {
+    const el = document.getElementById('rawLog');
+    el.innerHTML += `<div>${esc(text)}</div>`;
+    el.scrollTop = el.scrollHeight;
+    if (el.children.length > 200) el.removeChild(el.firstChild);
+}
+</script>
+</body>
+</html>
