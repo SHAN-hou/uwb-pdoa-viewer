@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>安信可 UWB PDOA</title>
+<title>UWB PDOA Viewer</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#080c14;--bg2:#0f1724;--bg3:#182234;--border:#1e3a5f;--border2:#253649;--text:#e8ecf4;--text2:#a0b4cc;--text3:#6b82a0;--blue:#60a5fa;--green:#34d399;--pink:#f472b6;--yellow:#fbbf24;--red:#ef4444}
@@ -109,7 +109,7 @@ select{cursor:pointer}
 <body>
 <div class="app sidebar-open">
   <div class="header">
-    <h1>◎ 安信可 UWB PDOA</h1>
+    <h1>◎ UWB PDOA</h1>
     <div class="badges">
       <span id="usbBadge" class="badge off">USB 未连接</span>
       <span id="atBadge" class="badge off">AT 未连接</span>
@@ -169,6 +169,7 @@ select{cursor:pointer}
             <button class="btn btn-secondary btn-sm" onclick="refreshPorts()">刷新</button>
             <button class="btn btn-primary btn-sm" id="atConnBtn" onclick="toggleAt()" style="flex:1">连接</button>
           </div>
+          <p id="atFeedback" style="font-size:12px;margin-top:4px;min-height:18px"></p>
         </div>
         <div class="group">
           <div class="group-title">实时数据</div>
@@ -357,6 +358,9 @@ function handleMsg(d) {
             updateBadge('atBadge', d.connected, 'AT');
             document.getElementById('atConnBtn').textContent = d.connected ? '断开' : '连接';
             document.getElementById('atConnBtn').className = 'btn btn-sm ' + (d.connected ? 'btn-danger' : 'btn-primary');
+            { const fb = document.getElementById('atFeedback');
+              fb.textContent = d.connected ? `✓ 已连接 ${d.port}` : 'AT 已断开';
+              fb.style.color = d.connected ? 'var(--green)' : 'var(--text3)'; }
             sysLog(d.connected ? `AT 已连接 ${d.port}` : 'AT 已断开');
             break;
         case 'position': updateTag(d); break;
@@ -367,7 +371,11 @@ function handleMsg(d) {
         case 'at_response': atLog(`<span class="rx">&lt; ${esc(d.text)}</span>`); break;
         case 'at_sent': atLog(`<span class="tx">&gt; ${esc(d.text)}</span>`); break;
         case 'raw': rawLog(d.text); break;
-        case 'error': sysLog(`错误: ${d.msg}`); break;
+        case 'error':
+            sysLog(`错误: ${d.msg}`);
+            { const fb = document.getElementById('atFeedback');
+              if (fb && d.msg) { fb.textContent = `✗ ${d.msg}`; fb.style.color = 'var(--red)'; } }
+            break;
         case 'calibration_updated':
             sysLog(`校正: 偏移=${d.angle_offset}° a=${d.dist_a} b=${d.dist_b}`);
             break;
@@ -707,10 +715,21 @@ function toggleUsb() {
     }
 }
 function toggleAt() {
-    if (atConnected) { wsSend({ action: 'disconnect_at' }); }
-    else {
+    const fb = document.getElementById('atFeedback');
+    if (atConnected) {
+        fb.textContent = '断开中...';
+        fb.style.color = 'var(--yellow)';
+        wsSend({ action: 'disconnect_at' });
+    } else {
         const p = document.getElementById('atPortSel').value;
-        if (!p) { sysLog('请选择AT端口'); return; }
+        if (!p) {
+            fb.textContent = '⚠ 请先选择AT端口';
+            fb.style.color = 'var(--red)';
+            sysLog('请选择AT端口');
+            return;
+        }
+        fb.textContent = '连接中...';
+        fb.style.color = 'var(--yellow)';
         wsSend({ action: 'connect_at', port: p });
     }
 }
