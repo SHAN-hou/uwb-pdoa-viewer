@@ -155,21 +155,44 @@ select{cursor:pointer}
       <!-- Serial Tab -->
       <div class="panel active" id="panel-serial">
         <div class="group">
-          <div class="group-title">USB 数据口 (BU04)</div>
-          <select id="usbPortSel"><option value="">选择端口...</option></select>
-          <div class="row" style="margin-top:8px">
-            <button class="btn btn-secondary btn-sm" onclick="refreshPorts()">刷新</button>
-            <button class="btn btn-primary btn-sm" id="usbConnBtn" onclick="toggleUsb()" style="flex:1">连接</button>
+          <div class="group-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>连接模式</span>
+            <span id="modeLabel" style="color:var(--blue);text-transform:none;letter-spacing:0">检测中...</span>
+          </div>
+          <p id="modeHint" style="font-size:12px;color:var(--text3);margin-bottom:8px"></p>
+        </div>
+        <!-- WebSerial mode -->
+        <div id="webserialPanel">
+          <div class="group">
+            <div class="group-title">USB 数据口 (BU04)</div>
+            <button class="btn btn-primary btn-sm btn-block" id="wsUsbBtn" onclick="wsToggleUsb()">选择串口并连接</button>
+            <p id="wsUsbFeedback" style="font-size:12px;margin-top:4px;min-height:18px"></p>
+          </div>
+          <div class="group">
+            <div class="group-title">TTL AT指令口</div>
+            <button class="btn btn-primary btn-sm btn-block" id="wsAtBtn" onclick="wsToggleAt()">选择串口并连接</button>
+            <p id="wsAtFeedback" style="font-size:12px;margin-top:4px;min-height:18px"></p>
           </div>
         </div>
-        <div class="group">
-          <div class="group-title">TTL AT指令口</div>
-          <select id="atPortSel"><option value="">选择端口...</option></select>
-          <div class="row" style="margin-top:8px">
-            <button class="btn btn-secondary btn-sm" onclick="refreshPorts()">刷新</button>
-            <button class="btn btn-primary btn-sm" id="atConnBtn" onclick="toggleAt()" style="flex:1">连接</button>
+        <!-- WebSocket mode -->
+        <div id="websocketPanel" style="display:none">
+          <div class="group">
+            <div class="group-title">USB 数据口 (BU04)</div>
+            <select id="usbPortSel"><option value="">选择端口...</option></select>
+            <div class="row" style="margin-top:8px">
+              <button class="btn btn-secondary btn-sm" onclick="refreshPorts()">刷新</button>
+              <button class="btn btn-primary btn-sm" id="usbConnBtn" onclick="toggleUsb()" style="flex:1">连接</button>
+            </div>
           </div>
-          <p id="atFeedback" style="font-size:12px;margin-top:4px;min-height:18px"></p>
+          <div class="group">
+            <div class="group-title">TTL AT指令口</div>
+            <select id="atPortSel"><option value="">选择端口...</option></select>
+            <div class="row" style="margin-top:8px">
+              <button class="btn btn-secondary btn-sm" onclick="refreshPorts()">刷新</button>
+              <button class="btn btn-primary btn-sm" id="atConnBtn" onclick="toggleAt()" style="flex:1">连接</button>
+            </div>
+            <p id="atFeedback" style="font-size:12px;margin-top:4px;min-height:18px"></p>
+          </div>
         </div>
         <div class="group">
           <div class="group-title">实时数据</div>
@@ -296,9 +319,19 @@ let tags = {};
 let colorIdx = 0;
 let floorplanImg = null;
 let sidebarOpen = true;
-
 let viewCenterX = 0, viewCenterY = 0;
 let isDragging = false, dragStartX = 0, dragStartY = 0, dragViewX = 0, dragViewY = 0;
+
+// Connection mode
+let connMode = 'webserial'; // 'webserial' or 'websocket'
+const hasWebSerial = !!navigator.serial;
+
+// WebSerial state
+let wsPort = null, wsReader = null, wsReadable = null;
+let wsAtPort = null, wsAtReader = null, wsAtReadable = null;
+
+// Calibration (client-side for webserial mode)
+let calAngleOffset = 0, calDistA = 1.0, calDistB = 0;
 
 // ─── Init ────────────────────────────────────────────
 window.addEventListener('load', () => {
@@ -310,9 +343,63 @@ window.addEventListener('load', () => {
     initTabs();
     initResize();
     initMapInteraction();
-    connectWS();
+    detectMode();
     requestAnimationFrame(animLoop);
 });
+
+function detectMode() {
+    const ml = document.getElementById('modeLabel');
+    const mh = document.getElementById('modeHint');
+    if (hasWebSerial) {
+        connMode = 'webserial';
+        ml.textContent = '浏览器直连';
+        mh.textContent = '使用 Web Serial API 直接连接串口，无需本地服务器';
+        document.getElementById('webserialPanel').style.display = '';
+        document.getElementById('websocketPanel').style.display = 'none';
+        sysLog('Web Serial API 可用，可直接连接串口');
+    } else {
+        connMode = 'websocket';
+        ml.textContent = '本地服务器';
+        mh.textContent = '浏览器不支持 Web Serial，需运行 python server.py';
+        document.getElementById('webserialPanel').style.display = 'none';
+        document.getElementById('websocketPanel').style.display = '';
+        connectWS();
+    }
+    // Try WebSocket as well if on localhost
+    if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        tryLocalWS();
+    }
+}
+
+function tryLocalWS() {
+    const testWs = new WebSocket('ws://localhost:8765');
+    testWs.onopen = () => {
+        testWs.close();
+        // Local server available, offer both modes
+        if (connMode === 'webserial') {
+            const mh = document.getElementById('modeHint');
+            mh.innerHTML = '浏览器直连可用 · <a href="#" style="color:var(--blue)" onclick="switchToWS();return false">切换到本地服务器模式</a>';
+        }
+    };
+    testWs.onerror = () => {};
+}
+
+function switchToWS() {
+    connMode = 'websocket';
+    document.getElementById('modeLabel').textContent = '本地服务器';
+    document.getElementById('modeHint').innerHTML = '通过 python server.py 连接 · <a href="#" style="color:var(--blue)" onclick="switchToSerial();return false">切换到浏览器直连</a>';
+    document.getElementById('webserialPanel').style.display = 'none';
+    document.getElementById('websocketPanel').style.display = '';
+    connectWS();
+}
+
+function switchToSerial() {
+    connMode = 'webserial';
+    document.getElementById('modeLabel').textContent = '浏览器直连';
+    document.getElementById('modeHint').innerHTML = '使用 Web Serial API · <a href="#" style="color:var(--blue)" onclick="switchToWS();return false">切换到本地服务器模式</a>';
+    document.getElementById('webserialPanel').style.display = '';
+    document.getElementById('websocketPanel').style.display = 'none';
+}
 
 function resizeCanvas() {
     dpr = window.devicePixelRatio || 1;
@@ -325,7 +412,6 @@ function resizeCanvas() {
     draw();
 }
 
-// ─── Sidebar Toggle ──────────────────────────────────
 function toggleSidebar() {
     sidebarOpen = !sidebarOpen;
     document.querySelector('.app').classList.toggle('sidebar-open', sidebarOpen);
@@ -333,12 +419,218 @@ function toggleSidebar() {
     setTimeout(() => { resizeCanvas(); draw(); }, 50);
 }
 
-// ─── WebSocket ───────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// ─── WebSerial: UWB Parser (ported from Python) ──────
+// ═══════════════════════════════════════════════════════
+
+function buildPosition(twr) {
+    const rawD = twr.D || 0;
+    const xcm = twr.Xcm || 0;
+    const ycm = twr.Ycm || 0;
+    const pdoa = twr.P || 0;
+    const addr = String(twr.a16 || '');
+    const seq = twr.R || 0;
+    const ts = twr.T || 0;
+    const clk = twr.O || 0;
+    const vRaw = twr.V || 0;
+    const accX = twr.X || 0;
+    const accY = twr.Y || 0;
+    const accZ = twr.Z || 0;
+
+    const corrD = calDistA * rawD + calDistB;
+    let angle;
+    if (ycm !== 0) angle = Math.atan(xcm / ycm) * 180 / Math.PI;
+    else angle = xcm > 0 ? 90 : (xcm < 0 ? -90 : 0);
+    angle += calAngleOffset;
+
+    return {
+        type: 'position', addr, seq, timestamp: ts,
+        raw_distance: rawD, distance: Math.round(corrD * 10) / 10,
+        angle: Math.round(angle * 10) / 10, pdoa,
+        xcm, ycm, xm: Math.round(xcm / 100 * 1000) / 1000,
+        ym: Math.round(ycm / 100 * 1000) / 1000,
+        clock_offset: clk, battery: vRaw,
+        acc_x: accX, acc_y: accY, acc_z: accZ,
+    };
+}
+
+function parseUwbLine(line) {
+    const results = [];
+    // NewTag
+    let m = line.match(/JS[0-9A-Fa-f]{4}(\{"NewTag"[^}]+\})/);
+    if (m) { try { const d = JSON.parse(m[1]); results.push({type:'new_tag', id: d.NewTag}); } catch(e){} }
+
+    // TWR with JS prefix
+    m = line.match(/JS[0-9A-Fa-f]{4}(\{"TWR":\{.+?\}\})/);
+    if (m) { try { const d = JSON.parse(m[1]).TWR; results.push(buildPosition(d)); } catch(e){} }
+
+    // Fallback: standalone {"a16":...}
+    if (!results.some(r => r.type === 'position')) {
+        m = line.match(/(\{"a16":.+?\})/);
+        if (m) { try { const d = JSON.parse(m[1]); if (d.D !== undefined) results.push(buildPosition(d)); } catch(e){} }
+    }
+    // Fallback: {"TWR":{...}} no JS prefix
+    if (!results.some(r => r.type === 'position')) {
+        m = line.match(/(\{"TWR":\{.+?\}\})/);
+        if (m) { try { const d = JSON.parse(m[1]).TWR; results.push(buildPosition(d)); } catch(e){} }
+    }
+    return results;
+}
+
+// ─── WebSerial USB Connection ────────────────────────
+async function wsToggleUsb() {
+    const fb = document.getElementById('wsUsbFeedback');
+    const btn = document.getElementById('wsUsbBtn');
+    if (usbConnected) {
+        // Disconnect
+        try {
+            if (wsReader) { await wsReader.cancel(); wsReader = null; }
+            if (wsReadable) { wsReadable.releaseLock(); wsReadable = null; }
+            if (wsPort) { await wsPort.close(); wsPort = null; }
+        } catch(e) {}
+        usbConnected = false;
+        updateBadge('usbBadge', false, 'USB');
+        btn.textContent = '选择串口并连接';
+        btn.className = 'btn btn-primary btn-sm btn-block';
+        fb.textContent = '已断开';
+        fb.style.color = 'var(--text3)';
+        sysLog('USB 已断开');
+    } else {
+        // Connect
+        try {
+            fb.textContent = '选择串口...';
+            fb.style.color = 'var(--yellow)';
+            wsPort = await navigator.serial.requestPort();
+            await wsPort.open({ baudRate: 115200 });
+            usbConnected = true;
+            updateBadge('usbBadge', true, 'USB');
+            btn.textContent = '断开 USB';
+            btn.className = 'btn btn-danger btn-sm btn-block';
+            fb.textContent = '✓ 已连接';
+            fb.style.color = 'var(--green)';
+            sysLog('USB 已连接 (WebSerial)');
+            wsReadSerialUsb();
+        } catch(e) {
+            fb.textContent = e.message || '连接失败';
+            fb.style.color = 'var(--red)';
+            sysLog('USB 连接失败: ' + e.message);
+        }
+    }
+}
+
+async function wsReadSerialUsb() {
+    let buf = '';
+    while (wsPort && wsPort.readable) {
+        const reader = wsPort.readable.getReader();
+        wsReader = reader;
+        try {
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                const text = new TextDecoder().decode(value);
+                buf += text;
+                while (buf.includes('\n')) {
+                    const idx = buf.indexOf('\n');
+                    const line = buf.substring(0, idx).trim();
+                    buf = buf.substring(idx + 1);
+                    if (line) {
+                        rawLog(line);
+                        const parsed = parseUwbLine(line);
+                        for (const p of parsed) {
+                            if (p.type === 'position') updateTag(p);
+                            else if (p.type === 'new_tag') sysLog('新标签: ' + p.id);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            if (e.name !== 'TypeError') sysLog('USB 读取中断: ' + e.message);
+        } finally {
+            reader.releaseLock();
+        }
+        if (!usbConnected) break;
+    }
+}
+
+// ─── WebSerial AT Connection ─────────────────────────
+async function wsToggleAt() {
+    const fb = document.getElementById('wsAtFeedback');
+    const btn = document.getElementById('wsAtBtn');
+    if (atConnected) {
+        try {
+            if (wsAtReader) { await wsAtReader.cancel(); wsAtReader = null; }
+            if (wsAtPort) { await wsAtPort.close(); wsAtPort = null; }
+        } catch(e) {}
+        atConnected = false;
+        updateBadge('atBadge', false, 'AT');
+        btn.textContent = '选择串口并连接';
+        btn.className = 'btn btn-primary btn-sm btn-block';
+        fb.textContent = '已断开';
+        fb.style.color = 'var(--text3)';
+        sysLog('AT 已断开');
+    } else {
+        try {
+            fb.textContent = '选择串口...';
+            fb.style.color = 'var(--yellow)';
+            wsAtPort = await navigator.serial.requestPort();
+            await wsAtPort.open({ baudRate: 115200 });
+            atConnected = true;
+            updateBadge('atBadge', true, 'AT');
+            btn.textContent = '断开 AT';
+            btn.className = 'btn btn-danger btn-sm btn-block';
+            fb.textContent = '✓ 已连接';
+            fb.style.color = 'var(--green)';
+            sysLog('AT 已连接 (WebSerial)');
+            wsReadSerialAt();
+        } catch(e) {
+            fb.textContent = e.message || '连接失败';
+            fb.style.color = 'var(--red)';
+            sysLog('AT 连接失败: ' + e.message);
+        }
+    }
+}
+
+async function wsReadSerialAt() {
+    let buf = '';
+    while (wsAtPort && wsAtPort.readable) {
+        const reader = wsAtPort.readable.getReader();
+        wsAtReader = reader;
+        try {
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += new TextDecoder().decode(value);
+                while (buf.includes('\n')) {
+                    const idx = buf.indexOf('\n');
+                    const line = buf.substring(0, idx).trim();
+                    buf = buf.substring(idx + 1);
+                    if (line) atLog(`<span class="rx">&lt; ${esc(line)}</span>`);
+                }
+            }
+        } catch (e) {
+            if (e.name !== 'TypeError') sysLog('AT 读取中断: ' + e.message);
+        } finally { reader.releaseLock(); }
+        if (!atConnected) break;
+    }
+}
+
+async function wsWriteAt(text) {
+    if (!wsAtPort || !wsAtPort.writable) return;
+    const writer = wsAtPort.writable.getWriter();
+    await writer.write(new TextEncoder().encode(text + '\r\n'));
+    writer.releaseLock();
+    atLog(`<span class="tx">&gt; ${esc(text)}</span>`);
+}
+
+// ═══════════════════════════════════════════════════════
+// ─── WebSocket Mode (local server) ───────────────────
+// ═══════════════════════════════════════════════════════
+
 function connectWS() {
     ws = new WebSocket('ws://localhost:8765');
     ws.onopen = () => { sysLog('WebSocket 已连接'); refreshPorts(); };
     ws.onmessage = e => handleMsg(JSON.parse(e.data));
-    ws.onclose = () => { sysLog('WebSocket 断开，重连中...'); setTimeout(connectWS, 2000); };
+    ws.onclose = () => { if (connMode === 'websocket') { sysLog('WebSocket 断开，重连中...'); setTimeout(connectWS, 2000); } };
     ws.onerror = () => {};
 }
 function wsSend(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
@@ -359,8 +651,8 @@ function handleMsg(d) {
             document.getElementById('atConnBtn').textContent = d.connected ? '断开' : '连接';
             document.getElementById('atConnBtn').className = 'btn btn-sm ' + (d.connected ? 'btn-danger' : 'btn-primary');
             { const fb = document.getElementById('atFeedback');
-              fb.textContent = d.connected ? `✓ 已连接 ${d.port}` : 'AT 已断开';
-              fb.style.color = d.connected ? 'var(--green)' : 'var(--text3)'; }
+              if (fb) { fb.textContent = d.connected ? `✓ 已连接 ${d.port}` : 'AT 已断开';
+              fb.style.color = d.connected ? 'var(--green)' : 'var(--text3)'; } }
             sysLog(d.connected ? `AT 已连接 ${d.port}` : 'AT 已断开');
             break;
         case 'position': updateTag(d); break;
@@ -398,12 +690,10 @@ function updateTag(d) {
     tags[addr].trail.push({ x: d.xm, y: d.ym, t: Date.now() });
     if (tags[addr].trail.length > 200) tags[addr].trail.shift();
 
-    // Floating overlay
     document.getElementById('liveD').textContent = d.distance;
     document.getElementById('liveA').textContent = d.angle;
     document.getElementById('liveX').textContent = d.xcm;
     document.getElementById('liveY').textContent = d.ycm;
-    // Sidebar cards
     document.getElementById('liveD2').textContent = d.distance;
     document.getElementById('liveA2').textContent = d.angle;
     document.getElementById('liveX2').textContent = d.xcm;
@@ -451,353 +741,174 @@ function drawMap() {
     const cx = W / 2 - viewCenterX * ppm;
     const cy = H - 50 - viewCenterY * ppm;
 
-    // Clear
     ctx.fillStyle = '#090e18';
     ctx.fillRect(0, 0, W, H);
 
-    // Floorplan
-    if (floorplanImg) {
-        ctx.globalAlpha = 0.3;
-        ctx.drawImage(floorplanImg, 0, 0, W, H);
-        ctx.globalAlpha = 1;
-    }
+    if (floorplanImg) { ctx.globalAlpha = 0.3; ctx.drawImage(floorplanImg, 0, 0, W, H); ctx.globalAlpha = 1; }
 
-    // Grid
     if (showGrid) {
-        ctx.strokeStyle = '#1a2844';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#1a2844'; ctx.lineWidth = 1;
         for (let x = -range * 2; x <= range * 2; x += step) {
-            const px = cx + x * ppm;
-            if (px < 0 || px > W) continue;
+            const px = cx + x * ppm; if (px < 0 || px > W) continue;
             ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
         }
         for (let y = -range * 2; y <= range * 2; y += step) {
-            const py = cy - y * ppm;
-            if (py < 0 || py > H) continue;
+            const py = cy - y * ppm; if (py < 0 || py > H) continue;
             ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke();
         }
         if (showLabels) {
-            ctx.font = '12px "Segoe UI", sans-serif';
-            ctx.fillStyle = '#3a506e';
-            ctx.textAlign = 'center';
-            for (let x = -range * 2; x <= range * 2; x += step * 2) {
-                const px = cx + x * ppm;
-                if (px > 20 && px < W - 20) ctx.fillText(`${x.toFixed(1)}`, px, cy + 18);
-            }
+            ctx.font = '12px "Segoe UI", sans-serif'; ctx.fillStyle = '#3a506e'; ctx.textAlign = 'center';
+            for (let x = -range * 2; x <= range * 2; x += step * 2) { const px = cx + x * ppm; if (px > 20 && px < W - 20) ctx.fillText(`${x.toFixed(1)}`, px, cy + 18); }
             ctx.textAlign = 'right';
-            for (let y = 0; y <= range * 2; y += step * 2) {
-                const py = cy - y * ppm;
-                if (py > 20 && py < H - 10) ctx.fillText(`${y.toFixed(1)}m`, cx - 8, py + 5);
-            }
+            for (let y = 0; y <= range * 2; y += step * 2) { const py = cy - y * ppm; if (py > 20 && py < H - 10) ctx.fillText(`${y.toFixed(1)}m`, cx - 8, py + 5); }
         }
     }
 
-    // Axes
-    ctx.strokeStyle = '#2563eb55';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#2563eb55'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
 
-    // FOV
     if (showFov) {
-        ctx.save();
-        ctx.strokeStyle = '#f59e0b44';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([8, 5]);
+        ctx.save(); ctx.strokeStyle = '#f59e0b44'; ctx.lineWidth = 2; ctx.setLineDash([8, 5]);
         const fovR = range * ppm;
-        [-60, 60].forEach(a => {
-            const rad = (a - 90) * Math.PI / 180;
-            ctx.beginPath(); ctx.moveTo(cx, cy);
-            ctx.lineTo(cx + Math.cos(rad) * fovR, cy + Math.sin(rad) * fovR);
-            ctx.stroke();
-        });
-        ctx.beginPath();
-        ctx.arc(cx, cy, fovR * 0.96, (-60 - 90) * Math.PI / 180, (60 - 90) * Math.PI / 180);
-        ctx.stroke();
+        [-60, 60].forEach(a => { const rad = (a - 90) * Math.PI / 180; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(rad) * fovR, cy + Math.sin(rad) * fovR); ctx.stroke(); });
+        ctx.beginPath(); ctx.arc(cx, cy, fovR * 0.96, (-60 - 90) * Math.PI / 180, (60 - 90) * Math.PI / 180); ctx.stroke();
         ctx.setLineDash([]);
-        if (showLabels) {
-            ctx.fillStyle = '#f59e0b66';
-            ctx.font = 'bold 13px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('120° FOV', cx, cy - fovR * 0.96 - 10);
-        }
+        if (showLabels) { ctx.fillStyle = '#f59e0b66'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('120° FOV', cx, cy - fovR * 0.96 - 10); }
         ctx.restore();
     }
 
-    // Range rings
-    ctx.strokeStyle = '#1e3a5f88';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#1e3a5f88'; ctx.lineWidth = 1;
     for (let r = 1; r <= range * 2; r++) {
-        const rr = r * ppm;
-        if (rr > Math.max(W, H)) break;
+        const rr = r * ppm; if (rr > Math.max(W, H)) break;
         ctx.beginPath(); ctx.arc(cx, cy, rr, Math.PI, 2 * Math.PI); ctx.stroke();
-        if (showLabels) {
-            ctx.fillStyle = '#3a506e';
-            ctx.font = 'bold 12px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText(`${r}m`, cx + 6, cy - rr - 5);
-        }
+        if (showLabels) { ctx.fillStyle = '#3a506e'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'; ctx.fillText(`${r}m`, cx + 6, cy - rr - 5); }
     }
 
-    // Angle guide lines (-60 -30 0 30 60)
     if (showLabels) {
         const guideR = range * ppm * 0.9;
         [-60, -30, 0, 30, 60].forEach(a => {
-            const rad = (a - 90) * Math.PI / 180;
-            const ex = cx + Math.cos(rad) * guideR;
-            const ey = cy + Math.sin(rad) * guideR;
-            ctx.beginPath();
-            ctx.strokeStyle = a === 0 ? '#2563eb33' : '#1e3a5f33';
-            ctx.lineWidth = a === 0 ? 2 : 1;
+            const rad = (a - 90) * Math.PI / 180; const ex = cx + Math.cos(rad) * guideR; const ey = cy + Math.sin(rad) * guideR;
+            ctx.beginPath(); ctx.strokeStyle = a === 0 ? '#2563eb33' : '#1e3a5f33'; ctx.lineWidth = a === 0 ? 2 : 1;
             ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
-            ctx.fillStyle = '#4b6584';
-            ctx.font = 'bold 12px sans-serif';
-            ctx.textAlign = 'center';
+            ctx.fillStyle = '#4b6584'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
             ctx.fillText(`${a}°`, ex + (a < 0 ? -14 : a > 0 ? 14 : 0), ey - 10);
         });
     }
 
-    // ─── Tags ────────────────────────────────────────
     for (const [addr, t] of Object.entries(tags)) {
         const c = tagColors[t.ci], d = t.data;
-
-        // Trail
         if (showTrail && t.trail.length > 1) {
-            ctx.beginPath();
-            ctx.strokeStyle = c + '55';
-            ctx.lineWidth = 2;
-            t.trail.forEach((p, i) => {
-                const px = cx + p.x * ppm, py = cy - p.y * ppm;
-                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-            });
+            ctx.beginPath(); ctx.strokeStyle = c + '55'; ctx.lineWidth = 2;
+            t.trail.forEach((p, i) => { const px = cx + p.x * ppm, py = cy - p.y * ppm; i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
             ctx.stroke();
-            t.trail.forEach((p, i) => {
-                const a = 0.1 + (i / t.trail.length) * 0.5;
-                ctx.beginPath();
-                ctx.fillStyle = c + Math.round(a * 255).toString(16).padStart(2, '0');
-                ctx.arc(cx + p.x * ppm, cy - p.y * ppm, 2.5, 0, Math.PI * 2);
-                ctx.fill();
-            });
+            t.trail.forEach((p, i) => { const a = 0.1 + (i / t.trail.length) * 0.5; ctx.beginPath(); ctx.fillStyle = c + Math.round(a * 255).toString(16).padStart(2, '0'); ctx.arc(cx + p.x * ppm, cy - p.y * ppm, 2.5, 0, Math.PI * 2); ctx.fill(); });
         }
-
         const tx = cx + d.xm * ppm, ty = cy - d.ym * ppm;
-
-        // Glow
-        const g = ctx.createRadialGradient(tx, ty, 0, tx, ty, 30);
-        g.addColorStop(0, c + 'aa');
-        g.addColorStop(1, c + '00');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(tx, ty, 30, 0, Math.PI * 2); ctx.fill();
-
-        // Dot
-        ctx.beginPath();
-        ctx.fillStyle = c;
-        ctx.arc(tx, ty, 8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
-
-        // Label
+        const g = ctx.createRadialGradient(tx, ty, 0, tx, ty, 30); g.addColorStop(0, c + 'aa'); g.addColorStop(1, c + '00');
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(tx, ty, 30, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.fillStyle = c; ctx.arc(tx, ty, 8, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke();
         if (showLabels) {
-            // Background for label
-            const labelText = `${d.distance}cm  ${d.angle}°`;
-            ctx.font = 'bold 14px "Segoe UI", monospace';
-            const tw = ctx.measureText(labelText).width;
-            ctx.fillStyle = 'rgba(9,14,24,.85)';
-            ctx.beginPath();
-            ctx.roundRect(tx - tw/2 - 8, ty - 32, tw + 16, 22, 6);
-            ctx.fill();
-            ctx.fillStyle = '#fff';
-            ctx.textAlign = 'center';
-            ctx.fillText(labelText, tx, ty - 16);
-
-            ctx.font = 'bold 12px monospace';
-            ctx.fillStyle = c;
-            ctx.fillText(`#${addr}`, tx, ty + 24);
+            const labelText = `${d.distance}cm  ${d.angle}°`; ctx.font = 'bold 14px "Segoe UI", monospace';
+            const tw = ctx.measureText(labelText).width; ctx.fillStyle = 'rgba(9,14,24,.85)';
+            ctx.beginPath(); ctx.roundRect(tx - tw/2 - 8, ty - 32, tw + 16, 22, 6); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(labelText, tx, ty - 16);
+            ctx.font = 'bold 12px monospace'; ctx.fillStyle = c; ctx.fillText(`#${addr}`, tx, ty + 24);
         }
     }
 
-    // Base station
-    ctx.beginPath();
-    ctx.fillStyle = '#10b981';
-    ctx.arc(cx, cy, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    if (showLabels) {
-        ctx.fillStyle = '#6ee7b7';
-        ctx.font = 'bold 13px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('基站 BU04', cx, cy + 28);
-    }
-
+    ctx.beginPath(); ctx.fillStyle = '#10b981'; ctx.arc(cx, cy, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+    if (showLabels) { ctx.fillStyle = '#6ee7b7'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('基站 BU04', cx, cy + 28); }
     needDraw = false;
 }
 
 // ─── Map Interaction ─────────────────────────────────
 function initMapInteraction() {
-    canvas.addEventListener('mousedown', e => {
-        isDragging = true;
-        dragStartX = e.clientX; dragStartY = e.clientY;
-        dragViewX = viewCenterX; dragViewY = viewCenterY;
-        canvas.style.cursor = 'grabbing';
-    });
-    window.addEventListener('mousemove', e => {
-        if (!isDragging) return;
-        const range = parseFloat(document.getElementById('gridRange').value) || 5;
-        const W = canvas.width / dpr, H = canvas.height / dpr;
-        const ppm = Math.min(W, H) / (range * 2);
-        viewCenterX = dragViewX - (e.clientX - dragStartX) / ppm;
-        viewCenterY = dragViewY + (e.clientY - dragStartY) / ppm;
-        draw();
-    });
+    canvas.addEventListener('mousedown', e => { isDragging = true; dragStartX = e.clientX; dragStartY = e.clientY; dragViewX = viewCenterX; dragViewY = viewCenterY; canvas.style.cursor = 'grabbing'; });
+    window.addEventListener('mousemove', e => { if (!isDragging) return; const range = parseFloat(document.getElementById('gridRange').value) || 5; const W = canvas.width / dpr, H = canvas.height / dpr; const ppm = Math.min(W, H) / (range * 2); viewCenterX = dragViewX - (e.clientX - dragStartX) / ppm; viewCenterY = dragViewY + (e.clientY - dragStartY) / ppm; draw(); });
     window.addEventListener('mouseup', () => { isDragging = false; canvas.style.cursor = ''; });
-    canvas.addEventListener('wheel', e => {
-        e.preventDefault();
-        const el = document.getElementById('gridRange');
-        let r = parseFloat(el.value);
-        r += e.deltaY > 0 ? 0.5 : -0.5;
-        r = Math.max(1, Math.min(50, r));
-        el.value = r;
-        draw();
-    });
+    canvas.addEventListener('wheel', e => { e.preventDefault(); const el = document.getElementById('gridRange'); let r = parseFloat(el.value); r += e.deltaY > 0 ? 0.5 : -0.5; r = Math.max(1, Math.min(50, r)); el.value = r; draw(); });
 }
 function centerView() { viewCenterX = 0; viewCenterY = 0; draw(); }
 
-// ─── Resize Handle ───────────────────────────────────
 function initResize() {
-    const handle = document.getElementById('resizeHandle');
-    const wrap = document.getElementById('tableWrap');
-    let startY, startH;
-    handle.addEventListener('mousedown', e => {
-        startY = e.clientY; startH = wrap.offsetHeight;
-        const onMove = e2 => {
-            wrap.style.height = Math.max(60, startH - (e2.clientY - startY)) + 'px';
-            resizeCanvas(); draw();
-        };
+    const handle = document.getElementById('resizeHandle'); const wrap = document.getElementById('tableWrap'); let startY, startH;
+    handle.addEventListener('mousedown', e => { startY = e.clientY; startH = wrap.offsetHeight;
+        const onMove = e2 => { wrap.style.height = Math.max(60, startH - (e2.clientY - startY)) + 'px'; resizeCanvas(); draw(); };
         const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', onUp);
-    });
+        window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp); });
 }
 
-// ─── Tabs ────────────────────────────────────────────
 function initTabs() {
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-            tab.classList.add('active');
-            document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
-        });
-    });
+    document.querySelectorAll('.tab').forEach(tab => { tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active'); document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    }); });
 }
 
-// ─── Serial Port Actions ─────────────────────────────
+// ─── WebSocket Serial Port Actions ───────────────────
 function refreshPorts() { wsSend({ action: 'list_ports' }); }
 function fillPorts(ports) {
     ['usbPortSel', 'atPortSel'].forEach(id => {
-        const sel = document.getElementById(id);
-        const cur = sel.value;
-        sel.innerHTML = '<option value="">选择端口...</option>';
+        const sel = document.getElementById(id); if (!sel) return;
+        const cur = sel.value; sel.innerHTML = '<option value="">选择端口...</option>';
         ports.forEach(p => { sel.innerHTML += `<option value="${p.port}">${p.port} - ${p.desc}</option>`; });
         if (cur) sel.value = cur;
     });
 }
 function toggleUsb() {
     if (usbConnected) { wsSend({ action: 'disconnect_usb' }); }
-    else {
-        const p = document.getElementById('usbPortSel').value;
-        if (!p) { sysLog('请选择USB端口'); return; }
-        wsSend({ action: 'connect_usb', port: p });
-    }
+    else { const p = document.getElementById('usbPortSel').value; if (!p) { sysLog('请选择USB端口'); return; } wsSend({ action: 'connect_usb', port: p }); }
 }
 function toggleAt() {
     const fb = document.getElementById('atFeedback');
-    if (atConnected) {
-        fb.textContent = '断开中...';
-        fb.style.color = 'var(--yellow)';
-        wsSend({ action: 'disconnect_at' });
+    if (atConnected) { fb.textContent = '断开中...'; fb.style.color = 'var(--yellow)'; wsSend({ action: 'disconnect_at' }); }
+    else { const p = document.getElementById('atPortSel').value; if (!p) { fb.textContent = '⚠ 请先选择AT端口'; fb.style.color = 'var(--red)'; return; } fb.textContent = '连接中...'; fb.style.color = 'var(--yellow)'; wsSend({ action: 'connect_at', port: p }); }
+}
+
+// ─── AT Commands (both modes) ────────────────────────
+function sendAT() {
+    const inp = document.getElementById('atInput'); const cmd = inp.value.trim(); if (!cmd) return; inp.value = '';
+    if (connMode === 'webserial' && wsAtPort) { wsWriteAt(cmd); }
+    else { wsSend({ action: 'send_at', text: cmd }); }
+}
+function quickAT(cmd) {
+    if (connMode === 'webserial' && wsAtPort) { wsWriteAt(cmd); }
+    else { wsSend({ action: 'send_at', text: cmd }); }
+    sysLog(`发送: ${cmd}`);
+}
+
+// ─── Calibration ─────────────────────────────────────
+function applyCalib() {
+    calAngleOffset = parseFloat(document.getElementById('angleOffset').value) || 0;
+    calDistA = parseFloat(document.getElementById('distA').value) || 1;
+    calDistB = parseFloat(document.getElementById('distB').value) || 0;
+    if (connMode === 'websocket') {
+        wsSend({ action: 'set_calibration', angle_offset: calAngleOffset, dist_a: calDistA, dist_b: calDistB });
     } else {
-        const p = document.getElementById('atPortSel').value;
-        if (!p) {
-            fb.textContent = '⚠ 请先选择AT端口';
-            fb.style.color = 'var(--red)';
-            sysLog('请选择AT端口');
-            return;
-        }
-        fb.textContent = '连接中...';
-        fb.style.color = 'var(--yellow)';
-        wsSend({ action: 'connect_at', port: p });
+        sysLog(`校正已应用: 偏移=${calAngleOffset}° a=${calDistA} b=${calDistB}`);
     }
 }
 
-// ─── AT Commands ─────────────────────────────────────
-function sendAT() {
-    const inp = document.getElementById('atInput');
-    const cmd = inp.value.trim();
-    if (!cmd) return;
-    wsSend({ action: 'send_at', text: cmd });
-    inp.value = '';
+function toggleLog() {
+    if (connMode === 'websocket') { wsSend({ action: isLogging ? 'stop_logging' : 'start_logging' }); }
+    else { sysLog('在线模式暂不支持数据记录'); }
 }
-function quickAT(cmd) { wsSend({ action: 'send_at', text: cmd }); sysLog(`发送: ${cmd}`); }
-
-// ─── Calibration / Logging ───────────────────────────
-function applyCalib() {
-    wsSend({
-        action: 'set_calibration',
-        angle_offset: parseFloat(document.getElementById('angleOffset').value) || 0,
-        dist_a: parseFloat(document.getElementById('distA').value) || 1,
-        dist_b: parseFloat(document.getElementById('distB').value) || 0,
-    });
-}
-function toggleLog() { wsSend({ action: isLogging ? 'stop_logging' : 'start_logging' }); }
 
 // ─── Floorplan ───────────────────────────────────────
-function loadFloorplan(e) {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-        floorplanImg = new Image();
-        floorplanImg.onload = () => draw();
-        floorplanImg.src = ev.target.result;
-    };
-    reader.readAsDataURL(file);
-}
+function loadFloorplan(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = ev => { floorplanImg = new Image(); floorplanImg.onload = () => draw(); floorplanImg.src = ev.target.result; }; reader.readAsDataURL(file); }
 function clearFloorplan() { floorplanImg = null; draw(); }
 
 // ─── Utils ───────────────────────────────────────────
 function clearTrails() { for (const t of Object.values(tags)) t.trail = []; draw(); }
-function clearTags() { wsSend({ action: 'clear_tags' }); tags = {}; updateTable(); draw(); }
-
-function updateBadge(id, on, label) {
-    const el = document.getElementById(id);
-    el.className = 'badge ' + (on ? 'on' : 'off');
-    el.textContent = label + (on ? ' 已连接' : ' 未连接');
-}
+function clearTags() { if (connMode === 'websocket') wsSend({ action: 'clear_tags' }); tags = {}; updateTable(); draw(); }
+function updateBadge(id, on, label) { const el = document.getElementById(id); el.className = 'badge ' + (on ? 'on' : 'off'); el.textContent = label + (on ? ' 已连接' : ' 未连接'); }
 function esc(s) { return s.replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-function sysLog(msg) {
-    const el = document.getElementById('sysLog');
-    const t = new Date().toLocaleTimeString();
-    el.innerHTML += `<div>[${t}] ${esc(msg)}</div>`;
-    el.scrollTop = el.scrollHeight;
-    if (el.children.length > 200) el.removeChild(el.firstChild);
-}
-function atLog(html) {
-    const el = document.getElementById('atTerminal');
-    el.innerHTML += `<div>${html}</div>`;
-    el.scrollTop = el.scrollHeight;
-    if (el.children.length > 300) el.removeChild(el.firstChild);
-}
-function rawLog(text) {
-    const el = document.getElementById('rawLog');
-    el.innerHTML += `<div>${esc(text)}</div>`;
-    el.scrollTop = el.scrollHeight;
-    if (el.children.length > 200) el.removeChild(el.firstChild);
-}
+function sysLog(msg) { const el = document.getElementById('sysLog'); const t = new Date().toLocaleTimeString(); el.innerHTML += `<div>[${t}] ${esc(msg)}</div>`; el.scrollTop = el.scrollHeight; if (el.children.length > 200) el.removeChild(el.firstChild); }
+function atLog(html) { const el = document.getElementById('atTerminal'); el.innerHTML += `<div>${html}</div>`; el.scrollTop = el.scrollHeight; if (el.children.length > 300) el.removeChild(el.firstChild); }
+function rawLog(text) { const el = document.getElementById('rawLog'); el.innerHTML += `<div>${esc(text)}</div>`; el.scrollTop = el.scrollHeight; if (el.children.length > 200) el.removeChild(el.firstChild); }
 </script>
 </body>
 </html>
