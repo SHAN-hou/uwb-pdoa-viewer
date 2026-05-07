@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UWB PDOA Viewer</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>UWB PDOA Viewer V1.1</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#080c14;--bg2:#0f1724;--bg3:#182234;--border:#1e3a5f;--border2:#253649;--text:#e8ecf4;--text2:#a0b4cc;--text3:#6b82a0;--blue:#60a5fa;--green:#34d399;--pink:#f472b6;--yellow:#fbbf24;--red:#ef4444}
@@ -109,7 +112,7 @@ select{cursor:pointer}
 <body>
 <div class="app sidebar-open">
   <div class="header">
-    <h1>◎ UWB PDOA</h1>
+    <h1>◎ UWB PDOA <small style="font-size:11px;color:var(--text3);font-weight:400">v1.1</small></h1>
     <div class="badges">
       <span id="usbBadge" class="badge off">USB 未连接</span>
       <span id="atBadge" class="badge off">AT 未连接</span>
@@ -350,6 +353,7 @@ window.addEventListener('load', () => {
 function detectMode() {
     const ml = document.getElementById('modeLabel');
     const mh = document.getElementById('modeHint');
+    console.log('[UWB] navigator.serial =', navigator.serial, 'hasWebSerial =', hasWebSerial);
     if (hasWebSerial) {
         connMode = 'webserial';
         ml.textContent = '浏览器直连';
@@ -360,10 +364,11 @@ function detectMode() {
     } else {
         connMode = 'websocket';
         ml.textContent = '本地服务器';
-        mh.textContent = '浏览器不支持 Web Serial，需运行 python server.py';
+        mh.innerHTML = '浏览器不支持 Web Serial。请用 <b>Chrome/Edge 89+</b> 打开此页面，或本地运行 python server.py';
         document.getElementById('webserialPanel').style.display = 'none';
         document.getElementById('websocketPanel').style.display = '';
         connectWS();
+        sysLog('⚠ Web Serial API 不可用 (navigator.serial = ' + typeof navigator.serial + ')');
     }
     // Try WebSocket as well if on localhost
     if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
